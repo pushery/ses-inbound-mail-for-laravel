@@ -1,0 +1,17 @@
+# Changelog
+
+All notable changes to `pushery/ses-inbound-mail-for-laravel` are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+A release carries only the sections that have an entry, in this order: `### ⚠️ Breaking`, `### ✨ Added`, `### 🔧 Changed`, `### ⚡ Performance`, `### 🐛 Fixed`, `### 🔒 Security`, `### 🧹 Deprecated`, `### 🗑️ Removed` and `### 📚 Documentation`.
+
+## [0.1.0] - 2026-11-08
+
+### ✨ Added
+
+- **An endpoint for the notifications of Amazon SNS.** It takes a message only from a topic of `ses-inbound-mail.topics` and only with a valid signature of SNS, confirms a subscription only at an address of SNS, and refuses everything else with 403, or 400 where it cannot read the message, before it uses anything of it. Every refusal is logged and dispatched as `NotificationRefused`. Its path, host and middleware come from the configuration.
+- **The takeover of a mail from transit.** Every mail SES reports gets one row, once per id SES gave it. A queued job copies the original byte for byte onto a disk of the application, reads the copy back and holds its SHA-256 and size against the original, and only then deletes it in transit. The application receives the mail through `ReceivesInboundMail`, again on a later try where it threw. One takeover of a mail is queued at a time, with its lock in the application's default cache store, so the reconciliation queues no second one while the first waits for its next try.
+- **The reconciliation, the net under the notifications.** Every five minutes, on one server, `ses-inbound-mail:reconcile` goes through every mail that has waited in transit for more than fifteen minutes, a limit that is the same for every application. A mail no notification reported is recorded with the envelope its headers name, leaving out an address longer than 320 characters, and taken over. A takeover that stopped is queued once more, the copy of a mail that was already taken over and the file SES writes to test its access are removed, and a mail that cannot be handled holds up none of the others. `ses-inbound-mail:take-over <key>` takes one mail by its key, whatever its age. For an application that runs `spatie/laravel-health`, `NoMailIsStuckInTransitCheck` fails while a mail waits past that time.
+- **The setup of the receiving path in AWS.** `php artisan ses-inbound-mail:setup-aws` sets up what `ses-inbound-mail.aws` names: the bucket of the transit with Block Public Access, Bucket owner enforced and SSE-S3, its policy that lets SES store only the mail of the application's own receipt rule, its lifecycle, the topic and its policy, the subscription of the endpoint, the receipt rule in the rule set `inbound` the applications of an account share, and an IAM policy that lets the application's user only read, list and delete in the transit. The lifecycle is the same for every application: a mail is deleted after 14 days as a net under the takeover, a version that is no longer the current one after a day, and an upload that never finished after a day. Every item is read first and written only where it differs, so a second run changes nothing, and `--check` writes nothing and fails where an item is missing or differs.
+
+[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/releases/tag/v0.1.0

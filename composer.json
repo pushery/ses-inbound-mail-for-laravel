@@ -1,0 +1,90 @@
+{
+  "$schema": "https://getcomposer.org/schema.json",
+  "name": "pushery/ses-inbound-mail-for-laravel",
+  "description": "Receive mail through Amazon SES in Laravel: a verified SNS endpoint, takeover from the S3 transit, reconciliation, a check for stuck mail and AWS setup.",
+  "keywords": [
+    "laravel",
+    "ses",
+    "inbound",
+    "mail"
+  ],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Pushery"
+    }
+  ],
+  "type": "library",
+  "homepage": "https://github.com/pushery/ses-inbound-mail-for-laravel",
+  "support": {
+    "issues": "https://github.com/pushery/ses-inbound-mail-for-laravel/issues",
+    "source": "https://github.com/pushery/ses-inbound-mail-for-laravel",
+    "docs": "https://docs.pushery.com/ses-inbound-mail-for-laravel/",
+    "security": "https://github.com/pushery/ses-inbound-mail-for-laravel/security/policy"
+  },
+  "require": {
+    "php": "^8.4",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "aws/aws-php-sns-message-validator": "^1.10",
+    "aws/aws-sdk-php": "^3.395",
+    "illuminate/bus": "^13.0",
+    "illuminate/config": "^13.0",
+    "illuminate/console": "^13.0",
+    "illuminate/container": "^13.0",
+    "illuminate/contracts": "^13.0",
+    "illuminate/database": "^13.0",
+    "illuminate/filesystem": "^13.0",
+    "illuminate/http": "^13.0",
+    "illuminate/log": "^13.0",
+    "illuminate/routing": "^13.0",
+    "illuminate/support": "^13.0"
+  },
+  "require-dev": {
+    "fakerphp/faker": "^1.24",
+    "larastan/larastan": "^3.9.3",
+    "laravel/ai": "^1.0",
+    "laravel/boost": "^2.9",
+    "laravel/mcp": "^1.0",
+    "laravel/pao": "^1.1",
+    "laravel/pint": "^1.0",
+    "orchestra/testbench": "^11.2",
+    "pestphp/pest": "^5.2.1",
+    "pestphp/pest-plugin-agent": "^5.0",
+    "pestphp/pest-plugin-browser": "^5.2",
+    "pestphp/pest-plugin-evals": "^5.1",
+    "pestphp/pest-plugin-laravel": "^5.0",
+    "pestphp/pest-plugin-phpstan": "^5.0",
+    "pestphp/pest-plugin-type-coverage": "^5.0",
+    "phpstan/phpstan": "^2.3.0",
+    "pushery/sqlens-for-laravel": "^0.32",
+    "rector/rector": "^2.7.0",
+    "spatie/laravel-health": "^1.40",
+    "spaze/phpstan-disallowed-calls": "^4.12",
+    "symfony/yaml": "^7.4.17 || ^8.1.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Pushery\\SesInboundMail\\": "src/"
+    }
+  },
+  "config": {
+    "sort-packages": true,
+    "process-timeout": 0,
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Pushery\\SesInboundMail\\SesInboundMailServiceProvider"
+      ]
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "suggest": {
+    "spatie/laravel-health": "For the check that fails while a mail waits in transit past its time (Pushery\\SesInboundMail\\Health\\NoMailIsStuckInTransitCheck)."
+  }
+}
