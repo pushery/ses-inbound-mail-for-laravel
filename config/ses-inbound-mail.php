@@ -55,8 +55,21 @@ return [
     ],
 
     /*
+    | How many days after its handover a mail keeps its row and its original on the archive disk.
+    | The row names the sender and the recipients, so neither should outlast what the application
+    | keeps of the mail. Once it is set, a daily `model:prune` deletes both; null keeps them until
+    | the application removes them.
+    */
+    'retention' => [
+        'days' => is_numeric($days = env('SES_INBOUND_MAIL_RETENTION_DAYS')) && (int) $days >= 1
+            ? (int) $days
+            : null,
+    ],
+
+    /*
     | The queue the takeover of a mail runs on, and how often it is tried before it fails. A takeover
-    | that fails for good leaves the mail in transit, where the reconciliation finds it again.
+    | that fails for good leaves the mail in transit or, once its original is on the archive disk,
+    | with its row, and the reconciliation finds it again either way.
     */
     'queue' => [
         'connection' => is_string($connection = env('SES_INBOUND_MAIL_QUEUE_CONNECTION')) && trim($connection) !== '' ? trim($connection) : null,

@@ -5,7 +5,13 @@ declare(strict_types=1);
 namespace Pushery\SesInboundMail\Models;
 
 use DateTimeImmutable;
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
+use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Storage;
 use LogicException;
 use Override;
 use Pushery\SesInboundMail\Models\Concerns\Replaceable;
@@ -30,9 +36,11 @@ use Pushery\SesInboundMail\ReportedMail;
  * @property int|null $size
  * @property DateTimeImmutable|null $taken_over_at
  * @property DateTimeImmutable|null $handed_over_at
+ * @property bool $found_in_transit
  */
 class InboundMail extends Model
 {
+    use Prunable;
     use Replaceable;
 
     /** @var string */
@@ -52,6 +60,7 @@ class InboundMail extends Model
         'size',
         'taken_over_at',
         'handed_over_at',
+        'found_in_transit',
     ];
 
     /**
@@ -70,6 +79,7 @@ class InboundMail extends Model
             'verdicts' => $mail->verdicts,
             'transit_key' => $mail->transitKey,
             'received_at' => $mail->receivedAt,
+            'found_in_transit' => $mail->foundInTransit,
         ];
     }
 
@@ -95,7 +105,37 @@ class InboundMail extends Model
             throw new LogicException(sprintf('The mail %s has not been taken over from transit yet.', $this->message_id));
         }
 
-        return new ReceivedMail($this->message_id, $this->sender, $this->recipients, $this->verdicts, $this->received_at, $disk, $path, $sha256, $size);
+        return new ReceivedMail($this->message_id, $this->sender, $this->recipients, $this->verdicts, $this->received_at, $disk, $path, $sha256, $size, $this->found_in_transit);
+    }
+
+    /**
+     * The mails handed to the application longer ago than the retention, and none while no retention
+     * is set, for `model:prune`.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        $container = Container::getInstance();
+        $days = $container->bound(Repository::class)
+            ? $container->make(Repository::class)->get('ses-inbound-mail.retention.days')
+            : null;
+
+        if (! is_int($days) || $days < 1) {
+            return static::model()::query()->whereKey([]);
+        }
+
+        return static::model()::query()
+            ->whereNotNull('handed_over_at')
+            ->where('handed_over_at', '<=', Date::now()->subDays($days));
+    }
+
+    /** Deletes the original on the archive disk before its row goes. */
+    protected function pruning(): void
+    {
+        if ($this->archive_disk !== null && $this->archive_path !== null) {
+            Storage::disk($this->archive_disk)->delete($this->archive_path);
+        }
     }
 
     /**
@@ -111,6 +151,7 @@ class InboundMail extends Model
             'size' => 'integer',
             'taken_over_at' => 'immutable_datetime',
             'handed_over_at' => 'immutable_datetime',
+            'found_in_transit' => 'boolean',
         ];
     }
 }
