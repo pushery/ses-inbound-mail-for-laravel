@@ -6,6 +6,7 @@ namespace Pushery\SesInboundMail;
 
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Contracts\Translation\Loader;
@@ -15,6 +16,7 @@ use Pushery\SesInboundMail\Aws\AwsClients;
 use Pushery\SesInboundMail\Console\ReconcileTheTransitCommand;
 use Pushery\SesInboundMail\Console\SetUpAwsCommand;
 use Pushery\SesInboundMail\Console\TakeOverAMailCommand;
+use Pushery\SesInboundMail\Models\InboundMail;
 use Pushery\SesInboundMail\Support\LanguageFallbackLoader;
 
 final class SesInboundMailServiceProvider extends ServiceProvider
@@ -58,8 +60,14 @@ final class SesInboundMailServiceProvider extends ServiceProvider
 
             // The net under the notifications reads the table of the reported mails, so it runs only
             // where the package keeps its tables.
-            $this->callAfterResolving(Schedule::class, static function (Schedule $schedule): void {
+            $this->callAfterResolving(Schedule::class, static function (Schedule $schedule, Container $container): void {
                 $schedule->command('ses-inbound-mail:reconcile')->everyFiveMinutes()->withoutOverlapping(5)->onOneServer();
+
+                // The prune deletes originals on the archive disk, so it is planned only where the
+                // configuration names a retention.
+                if (is_int($container->make(Repository::class)->get('ses-inbound-mail.retention.days'))) {
+                    $schedule->command('model:prune', ['--model' => [InboundMail::model()]])->daily()->onOneServer();
+                }
             });
         }
 

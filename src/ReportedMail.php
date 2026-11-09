@@ -28,6 +28,7 @@ final readonly class ReportedMail
     /**
      * @param  list<string>  $recipients
      * @param  array<string, string>  $verdicts  SES's verdicts by name: `spf`, `dkim`, `dmarc`, `spam`, `virus` and `dmarc_policy`
+     * @param  bool  $foundInTransit  whether the reconciliation found the mail in transit, rather than a notification reporting it
      */
     public function __construct(
         public string $messageId,
@@ -36,6 +37,7 @@ final readonly class ReportedMail
         public array $verdicts,
         public string $transitKey,
         public ?DateTimeImmutable $receivedAt = null,
+        public bool $foundInTransit = false,
     ) {}
 
     /** Whether an id is one this package keeps: no longer than SES writes them, and no part of a path. */

@@ -10,9 +10,10 @@ use Spatie\Health\Checks\Check;
 use Spatie\Health\Checks\Result;
 
 /**
- * Fails while a mail waits in transit past the time the reconciliation takes it, for an application
- * that runs `spatie/laravel-health`. Such a mail was neither reported nor reconciled: the scheduler
- * does not run, or its takeover keeps failing.
+ * Fails while a mail waits twice the time the reconciliation takes it, in transit or taken over and
+ * never handed to the application, for an application that runs `spatie/laravel-health`. Such a
+ * mail was not reconciled in two runs or more: the scheduler does not run, its takeover keeps
+ * failing, or the application refuses it.
  */
 final class NoMailIsStuckInTransitCheck extends Check
 {
@@ -27,6 +28,6 @@ final class NoMailIsStuckInTransitCheck extends Check
 
         return $result
             ->shortSummary(sprintf('%d stuck', count($stuck)))
-            ->failed(sprintf('%d mail(s) wait in transit for longer than %d minutes, one of them under %s. Run `php artisan ses-inbound-mail:reconcile`, and check that the scheduler runs and the queue takes the takeovers.', count($stuck), Reconciliation::AFTER_MINUTES, $stuck[0]));
+            ->failed(sprintf('%d mail(s) wait for longer than %d minutes to reach the application, one of them under %s. Run `php artisan ses-inbound-mail:reconcile`, and check that the scheduler runs, the queue takes the takeovers and the application takes the mail.', count($stuck), Reconciliation::STUCK_AFTER_MINUTES, $stuck[0]));
     }
 }

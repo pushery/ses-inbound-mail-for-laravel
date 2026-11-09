@@ -16,6 +16,7 @@ final readonly class ReceivedMail
     /**
      * @param  list<string>  $recipients
      * @param  array<string, string>  $verdicts  SES's verdicts by name: `spf`, `dkim`, `dmarc`, `spam`, `virus` and `dmarc_policy`
+     * @param  bool  $foundInTransit  whether the reconciliation found the mail in transit, rather than a notification reporting it; its verdicts then name spam and viruses only
      */
     public function __construct(
         public string $messageId,
@@ -27,5 +28,6 @@ final readonly class ReceivedMail
         public string $path,
         public string $sha256,
         public int $size,
+        public bool $foundInTransit = false,
     ) {}
 }

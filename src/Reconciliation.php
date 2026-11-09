@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Pushery\SesInboundMail;
 
+use Closure;
 use DateTimeImmutable;
+use DateTimeInterface;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Log;
 use Pushery\SesInboundMail\Models\InboundMail;
@@ -20,13 +23,21 @@ use Throwable;
  * reported, and is then recorded with the envelope its headers name and taken over, or its takeover
  * stopped, and is then queued once more, unless one is queued already. A mail taken over whose
  * original is still in transit loses
- * that copy, and the file SES writes to test its access to the bucket is removed. One mail that cannot
- * be handled holds up none of the others.
+ * that copy, and the file SES writes to test its access to the bucket is removed. A mail taken over
+ * as long ago that never reached the application is found by its row, since its original left the
+ * transit, and its takeover is queued once more as well. One mail that cannot be handled holds up
+ * none of the others.
  */
 final readonly class Reconciliation
 {
     /** How long a mail waits in transit before the reconciliation takes it, the same for every application. */
     public const int AFTER_MINUTES = 15;
+
+    /**
+     * How long a mail waits before it counts as stuck: twice the time the reconciliation waits, so a
+     * mail that its next run takes in the ordinary way, up to five minutes later, is not reported first.
+     */
+    public const int STUCK_AFTER_MINUTES = 2 * self::AFTER_MINUTES;
 
     public const string RECORDED = 'recorded';
 
@@ -54,21 +65,22 @@ final readonly class Reconciliation
     public function run(): array
     {
         $disk = $this->transit->disk();
-        $due = Date::now()->subMinutes(self::AFTER_MINUTES)->getTimestamp();
+        $due = Date::now()->subMinutes(self::AFTER_MINUTES);
         $outcomes = [];
 
         foreach ($disk->allFiles() as $key) {
-            if ($disk->lastModified($key) > $due) {
+            if ($disk->lastModified($key) > $due->getTimestamp()) {
                 continue;
             }
 
-            try {
-                $outcome = $this->handle($key);
-            } catch (Throwable $failure) {
-                $this->exceptions->report($failure);
-                $outcome = self::FAILED;
-            }
+            $outcome = $this->outcomeOf(fn (): string => $this->handle($key));
+            $outcomes[$outcome] = ($outcomes[$outcome] ?? 0) + 1;
+        }
 
+        // The takeover copies the original and deletes it in transit before the application is
+        // called, so a mail the application refused in every try is left with its row alone.
+        foreach ($this->notHandedOver($due)->lazyById() as $mail) {
+            $outcome = $this->outcomeOf(fn (): string => $this->inbox->takeOver($mail) ? self::STARTED_AGAIN : self::QUEUED_ALREADY);
             $outcomes[$outcome] = ($outcomes[$outcome] ?? 0) + 1;
         }
 
@@ -117,29 +129,65 @@ final readonly class Reconciliation
         }
 
         $envelope = StoredEnvelope::read($this->headOf($disk, $key));
-        $this->inbox->announce(new ReportedMail($id, $envelope->sender, $envelope->recipients, [], $key, new DateTimeImmutable('@'.$disk->lastModified($key))));
+        $this->inbox->announce(new ReportedMail($id, $envelope->sender, $envelope->recipients, $envelope->verdicts, $key, new DateTimeImmutable('@'.$disk->lastModified($key)), foundInTransit: true));
 
         return self::RECORDED;
     }
 
     /**
-     * The mails that wait in transit past the time the reconciliation takes them, by key.
+     * The mails that wait longer than {@see self::STUCK_AFTER_MINUTES} minutes, by the key they have
+     * or had in transit: in transit still, or taken over and never handed to the application.
      *
      * @return list<string>
      */
     public function stuck(): array
     {
         $disk = $this->transit->disk();
-        $due = Date::now()->subMinutes(self::AFTER_MINUTES)->getTimestamp();
+        $due = Date::now()->subMinutes(self::STUCK_AFTER_MINUTES);
         $stuck = [];
 
         foreach ($disk->allFiles() as $key) {
-            if (! Transit::isTheSetupNotification($key) && ReportedMail::isAnId(basename($key)) && $disk->lastModified($key) <= $due) {
+            if (! Transit::isTheSetupNotification($key) && ReportedMail::isAnId(basename($key)) && $disk->lastModified($key) <= $due->getTimestamp()) {
+                $stuck[] = $key;
+            }
+        }
+
+        foreach ($this->notHandedOver($due)->pluck('transit_key') as $key) {
+            if (is_string($key) && ! in_array($key, $stuck, true)) {
                 $stuck[] = $key;
             }
         }
 
         return $stuck;
+    }
+
+    /**
+     * The mails taken over from transit up to a moment that the application never took.
+     *
+     * @return Builder<InboundMail>
+     */
+    private function notHandedOver(DateTimeInterface $until): Builder
+    {
+        return InboundMail::model()::query()
+            ->whereNotNull('taken_over_at')
+            ->whereNull('handed_over_at')
+            ->where('taken_over_at', '<=', $until);
+    }
+
+    /**
+     * The outcome of handling one mail, or {@see self::FAILED} where handling it threw, reported.
+     *
+     * @param  Closure(): string  $handle
+     */
+    private function outcomeOf(Closure $handle): string
+    {
+        try {
+            return $handle();
+        } catch (Throwable $failure) {
+            $this->exceptions->report($failure);
+
+            return self::FAILED;
+        }
     }
 
     /** The start of a stored mail, as much as holds its headers. */
