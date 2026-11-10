@@ -64,9 +64,11 @@ final class SesInboundMailServiceProvider extends ServiceProvider
                 $schedule->command('ses-inbound-mail:reconcile')->everyFiveMinutes()->withoutOverlapping(5)->onOneServer();
 
                 // The prune deletes originals on the archive disk, so it is planned only where the
-                // configuration names a retention.
+                // configuration names a retention. A prune that outlasts the day holds back the next one,
+                // as the net above does over its five minutes: two at once would delete the same rows and
+                // originals together.
                 if (is_int($container->make(Repository::class)->get('ses-inbound-mail.retention.days'))) {
-                    $schedule->command('model:prune', ['--model' => [InboundMail::model()]])->daily()->onOneServer();
+                    $schedule->command('model:prune', ['--model' => [InboundMail::model()]])->daily()->withoutOverlapping(1440)->onOneServer();
                 }
             });
         }
