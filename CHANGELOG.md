@@ -4,6 +4,12 @@ All notable changes to `pushery/ses-inbound-mail-for-laravel` are documented her
 
 A release carries only the sections that have an entry, in this order: `### ⚠️ Breaking`, `### ✨ Added`, `### 🔧 Changed`, `### ⚡ Performance`, `### 🐛 Fixed`, `### 🔒 Security`, `### 🧹 Deprecated`, `### 🗑️ Removed` and `### 📚 Documentation`.
 
+## [0.2.2] - 2026-11-11
+
+### 🐛 Fixed
+
+- **A daily prune that was killed no longer keeps the next day's prune from running.** 0.2.1 locked the prune for 1440 minutes, exactly its interval, so the lock of a prune that died without releasing it lasted until the next prune was due, and that prune was skipped without a word. An application whose schedule guard asks every task for a lock under its interval failed on it as well. The lock now lasts 120 minutes, and a running prune still holds back a second one.
+
 ## [0.2.1] - 2026-11-10
 
 ### 🐛 Fixed
@@ -32,7 +38,8 @@ A release carries only the sections that have an entry, in this order: `### ⚠�
 - **The reconciliation, the net under the notifications.** Every five minutes, on one server, `ses-inbound-mail:reconcile` goes through every mail that has waited in transit for more than fifteen minutes, a limit that is the same for every application. A mail no notification reported is recorded with the envelope its headers name, leaving out an address longer than 320 characters, and taken over. A takeover that stopped is queued once more, the copy of a mail that was already taken over and the file SES writes to test its access are removed, and a mail that cannot be handled holds up none of the others. `ses-inbound-mail:take-over <key>` takes one mail by its key, whatever its age. For an application that runs `spatie/laravel-health`, `NoMailIsStuckInTransitCheck` fails while a mail waits past that time.
 - **The setup of the receiving path in AWS.** `php artisan ses-inbound-mail:setup-aws` sets up what `ses-inbound-mail.aws` names: the bucket of the transit with Block Public Access, Bucket owner enforced and SSE-S3, its policy that lets SES store only the mail of the application's own receipt rule, its lifecycle, the topic and its policy, the subscription of the endpoint, the receipt rule in the rule set `inbound` the applications of an account share, and an IAM policy that lets the application's user only read, list and delete in the transit. The lifecycle is the same for every application: a mail is deleted after 14 days as a net under the takeover, a version that is no longer the current one after a day, and an upload that never finished after a day. Every item is read first and written only where it differs, so a second run changes nothing, and `--check` writes nothing and fails where an item is missing or differs.
 
-[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/releases/tag/v0.1.0
