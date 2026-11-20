@@ -36,6 +36,12 @@ final readonly class SnsGate
     /** How much of a topic a refusal keeps, since a stranger chooses its length. */
     private const int LONGEST_TOPIC_KEPT = 256;
 
+    /**
+     * The fields the validator of the signatures reads as text: the fields SNS signs, the signature,
+     * its version and the address of its certificate, each in every spelling the validator takes.
+     */
+    private const array TEXT_FIELDS = ['Message', 'MessageId', 'Subject', 'SubscribeURL', 'SubscribeUrl', 'Timestamp', 'Token', 'TopicArn', 'Type', 'Signature', 'SignatureVersion', 'SigningCertURL', 'SigningCertUrl'];
+
     /** The validator of the signatures, with the certificates fetched and kept by the package. */
     private MessageValidator $validator;
 
@@ -67,6 +73,13 @@ final readonly class SnsGate
             return $this->refuse($request, NotificationRefused::TOPIC, $topic);
         }
 
+        // The validator refuses a signature it cannot verify, but a list or a map where it reads text
+        // breaks it with an error. Such a message, like one without a signature to verify, is
+        // refused before it is handed over.
+        if (! $this->carriesTextWhereSnsWritesText($message)) {
+            return $this->refuse($request, NotificationRefused::UNREADABLE, $topic, 400);
+        }
+
         if (! $this->validator->isValid($message)) {
             return $this->refuse($request, NotificationRefused::SIGNATURE, $topic);
         }
@@ -78,10 +91,31 @@ final readonly class SnsGate
         };
     }
 
-    /** A field of a message of SNS as text, or null where it is none or empty. */
+    /**
+     * A field of a message of SNS as text, or null where it is none or empty.
+     *
+     * @param  mixed  $value  a field of the message as the sender wrote it, which may hold any JSON value
+     */
     public static function text(mixed $value): ?string
     {
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Whether every field the validator reads as text is text where the message has it, and the
+     * signature, its version and the address of its certificate are there and not empty.
+     */
+    private function carriesTextWhereSnsWritesText(Message $message): bool
+    {
+        foreach (self::TEXT_FIELDS as $field) {
+            if ($message[$field] !== null && ! is_string($message[$field])) {
+                return false;
+            }
+        }
+
+        return self::text($message['Signature']) !== null
+            && self::text($message['SignatureVersion']) !== null
+            && (self::text($message['SigningCertURL']) ?? self::text($message['SigningCertUrl'])) !== null;
     }
 
     private function confirm(Request $request, Message $message, string $topic): Response
@@ -92,7 +126,13 @@ final readonly class SnsGate
             return $this->refuse($request, NotificationRefused::SUBSCRIPTION_ADDRESS, $topic);
         }
 
-        $this->http->timeout(self::CONFIRMATION_TIMEOUT)->get($address)->throw();
+        // No redirect is followed: the address is one of SNS, and Guzzle would follow an answer wherever it points, over
+        // http as well. A 3xx answer is no confirmation either, and throw() covers 4xx and 5xx alone.
+        $response = $this->http->timeout(self::CONFIRMATION_TIMEOUT)->withoutRedirecting()->get($address)->throw();
+
+        if ($response->redirect()) {
+            throw new RuntimeException(sprintf('The address of a subscription of Amazon SNS answered %d instead of confirming it.', $response->status()));
+        }
 
         Log::info('Confirmed the subscription to a topic of Amazon SNS for incoming mail.', ['topic' => $topic]);
 

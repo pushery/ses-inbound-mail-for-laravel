@@ -22,7 +22,9 @@ return [
     /*
     | The topics of Amazon SNS the endpoint takes messages from, by their ARN, separated by commas
     | in SES_INBOUND_MAIL_TOPICS. A message from any other topic is refused with 403, and so is
-    | every message while the list is empty.
+    | every message while the list is empty. The topic of `aws.topic` below, which
+    | `php artisan ses-inbound-mail:setup-aws` subscribes the endpoint to, has to be one of them,
+    | and the setup fails while it is not.
     */
     'topics' => is_string($topics = env('SES_INBOUND_MAIL_TOPICS'))
         ? array_values(array_filter(array_map(trim(...), explode(',', $topics)), static fn (string $topic): bool => $topic !== ''))
@@ -46,8 +48,11 @@ return [
 
     /*
     | Where the original of every mail goes, byte for byte, before the application receives it: a
-    | disk of the application and a directory on it. The transit keeps nothing for a person to
-    | look at, because its lifecycle removes whatever is older than fourteen days.
+    | disk of the application and a directory on it. Once a mail is taken over, the archive holds
+    | its only copy, so the disk has to be one that every web server and worker reads and that
+    | survives a deploy, a bucket for example. The default `local` suits only a single server whose
+    | disk outlasts its deploys. The transit keeps nothing for a person to look at, because its
+    | lifecycle removes whatever is older than fourteen days.
     */
     'archive' => [
         'disk' => is_string($archive = env('SES_INBOUND_MAIL_ARCHIVE_DISK')) && trim($archive) !== '' ? trim($archive) : 'local',

@@ -11,12 +11,14 @@ use InvalidArgumentException;
  * What the setup in AWS is for, read from `ses-inbound-mail.aws`: the region and the account, the
  * bucket of the transit and the prefix SES stores under, the topic and the receipt rule of this
  * application, the recipients the rule takes, the endpoint SNS delivers to and the IAM user the
- * application runs under.
+ * application runs under. Beside them the topics the endpoint takes, from `ses-inbound-mail.topics`,
+ * which the setup reads and never writes.
  */
 final readonly class SetupTarget
 {
     /**
      * @param  list<string>  $recipients
+     * @param  list<string>  $topics  the topics the endpoint of the application takes messages from, by their ARN
      */
     public function __construct(
         public string $region,
@@ -28,6 +30,7 @@ final readonly class SetupTarget
         public array $recipients,
         public string $endpoint,
         public string $user,
+        public array $topics = [],
     ) {}
 
     /**
@@ -71,7 +74,18 @@ final readonly class SetupTarget
             throw new InvalidArgumentException(sprintf('The setup in AWS needs ses-inbound-mail.aws.%s.', implode(', ses-inbound-mail.aws.', $missing)));
         }
 
-        return new self($values['region'], $values['account'], $values['bucket'], $text('prefix'), $values['topic'], $values['rule'], $recipients, $values['endpoint'], $values['user']);
+        // Read as the endpoint reads it, entry by entry and untrimmed, so the setup finds the topic
+        // in the list exactly where the endpoint takes its messages.
+        $listed = $config->get('ses-inbound-mail.topics');
+        $topics = [];
+
+        foreach (is_array($listed) ? $listed : [] as $entry) {
+            if (is_string($entry)) {
+                $topics[] = $entry;
+            }
+        }
+
+        return new self($values['region'], $values['account'], $values['bucket'], $text('prefix'), $values['topic'], $values['rule'], $recipients, $values['endpoint'], $values['user'], $topics);
     }
 
     /** The ARN of the topic. */

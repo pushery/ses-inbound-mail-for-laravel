@@ -91,13 +91,20 @@ final class SesNotification
         return $verdicts;
     }
 
-    /** @return array<array-key, mixed> */
+    /**
+     * @param  mixed  $value  a field of the notification as SES wrote it, which may hold any JSON value
+     * @return array<array-key, mixed>
+     */
     private static function map(mixed $value): array
     {
         return is_array($value) ? $value : [];
     }
 
-    /** A time SES wrote as ISO 8601, in UTC, or null for none or one it is not. */
+    /**
+     * A time SES wrote as ISO 8601, in UTC, or null for none or one it is not.
+     *
+     * @param  mixed  $value  a field of the notification as SES wrote it, which may hold any JSON value
+     */
     private static function timeOf(mixed $value): ?DateTimeImmutable
     {
         $text = self::text($value);
@@ -113,12 +120,18 @@ final class SesNotification
         }
     }
 
+    /**
+     * @param  mixed  $value  a field of the notification as SES wrote it, which may hold any JSON value
+     */
     private static function text(mixed $value): ?string
     {
         return is_string($value) && $value !== '' ? $value : null;
     }
 
-    /** @return list<string> */
+    /**
+     * @param  mixed  $value  a field of the notification as SES wrote it, which may hold any JSON value
+     * @return list<string>
+     */
     private static function texts(mixed $value): array
     {
         $texts = [];

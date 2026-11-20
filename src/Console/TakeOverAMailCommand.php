@@ -13,6 +13,8 @@ use RuntimeException;
 /**
  * Takes over one mail in transit by its key, whatever its age: records it where no notification did,
  * queues its takeover once more where it stopped, and removes the copy of a mail taken over before.
+ * It fails, and says why, where no mail waits under the key, the mail cannot be read, or the disk
+ * keeps the file it was asked to delete.
  */
 #[Signature('ses-inbound-mail:take-over {key : The key of the mail on the transit disk}')]
 #[Description('Take over one mail in transit by its key, whatever its age.')]
@@ -22,8 +24,8 @@ final class TakeOverAMailCommand extends Command
     {
         try {
             $outcome = $reconciliation->handle($this->argument('key'));
-        } catch (RuntimeException $missing) {
-            $this->error($missing->getMessage());
+        } catch (RuntimeException $failure) {
+            $this->error($failure->getMessage());
 
             return self::FAILURE;
         }

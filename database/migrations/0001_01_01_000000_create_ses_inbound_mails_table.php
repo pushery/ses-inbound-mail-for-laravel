@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Pushery\SesInboundMail\Support\TableLookup;
 
 // One row for each mail SES reports, kept unique by the id SES gave it, so a notification SNS
 // delivers twice and the reconciliation after it record the mail once.
@@ -16,6 +18,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // A copy of this file can run after the table exists: an application that publishes the
+        // migrations a second time, or once they have run from the package, gets every file again
+        // under a new date, and `migrate` takes each copy for a migration it has not run. The copy
+        // leaves the table it finds, and the mails in it, as they are.
+        if (TableLookup::exists('ses_inbound_mails')) {
+            return;
+        }
+
         Schema::create('ses_inbound_mails', function (Blueprint $table): void {
             $table->id();
             $table->string('message_id', 255)->unique();
@@ -37,6 +47,12 @@ return new class extends Migration
 
     public function down(): void
     {
+        // up() leaves a table it finds in place, so the table this rollback would drop can hold the
+        // mails an earlier run recorded. The rollback refuses to take them along.
+        if (TableLookup::exists('ses_inbound_mails') && DB::table('ses_inbound_mails')->exists()) {
+            throw new RuntimeException('Refusing to drop the ses_inbound_mails table while it holds mails. Delete them first if they can go.');
+        }
+
         Schema::dropIfExists('ses_inbound_mails');
     }
 };

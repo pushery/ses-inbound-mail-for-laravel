@@ -10,8 +10,9 @@ use Illuminate\Console\Command;
 use Pushery\SesInboundMail\Reconciliation;
 
 /**
- * Handles every mail that waits in transit longer than the reconciliation allows, and names how many
- * mails had each outcome. Scheduled by the package every five minutes.
+ * Handles every mail that waits in transit longer than the reconciliation allows, names how many
+ * mails had each outcome, and fails where a mail failed or is lost. Scheduled by the package every
+ * five minutes.
  */
 #[Signature('ses-inbound-mail:reconcile')]
 #[Description('Take over every mail that waits in transit longer than its notification should have taken.')]
@@ -31,6 +32,6 @@ final class ReconcileTheTransitCommand extends Command
             $this->line(sprintf('%s: %d', $outcome, $count));
         }
 
-        return array_key_exists(Reconciliation::FAILED, $outcomes) ? self::FAILURE : self::SUCCESS;
+        return array_key_exists(Reconciliation::FAILED, $outcomes) || array_key_exists(Reconciliation::LOST, $outcomes) ? self::FAILURE : self::SUCCESS;
     }
 }

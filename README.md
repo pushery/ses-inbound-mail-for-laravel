@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/pushery/ses-inbound-mail-for-laravel">
-    <img src="art/header.png" alt="SES Inbound Mail for Laravel" width="100%">
+    <img src="https://raw.githubusercontent.com/pushery/ses-inbound-mail-for-laravel/main/art/header.png" alt="SES Inbound Mail for Laravel" width="100%">
   </a>
 </p>
 
@@ -11,11 +11,11 @@
 [![Laravel Versions](https://badge.laravel.cloud/badge/pushery/ses-inbound-mail-for-laravel?style=flat)](https://packagist.org/packages/pushery/ses-inbound-mail-for-laravel)
 [![License](https://img.shields.io/packagist/l/pushery/ses-inbound-mail-for-laravel.svg)](LICENSE)
 
-[![Tests](https://img.shields.io/badge/tests-Pest%205-8BC34A.svg)](https://pestphp.com)
-![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)
-![Type Coverage](https://img.shields.io/badge/types-100%25-brightgreen.svg)
-[![PHPStan](https://img.shields.io/badge/PHPStan-max-blue.svg)](https://phpstan.org)
-[![Code Style](https://img.shields.io/badge/code%20style-pint-orange.svg)](https://laravel.com/docs/pint)
+[![Tests: Pest 5](https://img.shields.io/badge/tests-Pest%205-8BC34A.svg)](https://pestphp.com)
+![Coverage: 100%](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)
+![Type coverage: 100%](https://img.shields.io/badge/types-100%25-brightgreen.svg)
+[![PHPStan: level 10](https://img.shields.io/badge/PHPStan-10-blue.svg)](https://phpstan.org)
+[![Code style: Pint](https://img.shields.io/badge/code%20style-pint-orange.svg)](https://laravel.com/docs/pint)
 
 Receive mail through Amazon SES in Laravel: a verified SNS endpoint, takeover from the S3 transit, reconciliation, a check for stuck mail and AWS setup.
 
@@ -32,19 +32,22 @@ there.
 - Laravel 13+
 
 Tested on PostgreSQL and MySQL 8.4, the databases Laravel Cloud runs (serverless Postgres
-and MySQL 8.4 LTS), so it runs there out of the box. The fast suite runs on SQLite.
+and MySQL 8.4 LTS). The fast suite runs on SQLite.
 
-Tested on **PHP 8.4** — the floor of the declared range, because a `>=` promise is
-only proven by running on the boundary — and on **PHP 8.5**, so the upper half of
-`^8.4` is exercised here rather than first by a consumer.
+Tested on the floor of the declared PHP range, because a `>=` promise is only proven
+by running on the boundary, and on the minor version above it, so the range above the
+floor is exercised here rather than first by a consumer.
 
 ## Installation
 
 ```bash
 composer require pushery/ses-inbound-mail-for-laravel
+composer require league/flysystem-aws-s3-v3 "^3.0"
 ```
 
-The service provider is registered automatically through package discovery.
+The service provider is registered automatically through package discovery. The second command
+installs the Flysystem adapter for S3, which Laravel's `s3` driver needs for the transit disk that
+SES stores every mail into.
 
 ## Configuration
 
@@ -57,25 +60,44 @@ php artisan vendor:publish --tag=ses-inbound-mail-config
 This writes `config/ses-inbound-mail.php`, where every option is documented inline.
 
 The package records every mail it receives in a table of its own, `ses_inbound_mails`, and
-`php artisan migrate` runs its migration from the package as it is. To keep the migration in your
-application instead, call
-`\Pushery\SesInboundMail\SesInboundMailServiceProvider::ignoreMigrations()` in the `register` method of your
-`AppServiceProvider` first, then publish and run it:
+`php artisan migrate` runs its migrations from the package as they are. To keep the migrations in
+your application instead, decide before your first `php artisan migrate`: call
+`\Pushery\SesInboundMail\SesInboundMailServiceProvider::ignoreMigrations(tablesExist: true)` in the `register` method of your
+`AppServiceProvider` first, then publish and run them:
 
 ```bash
 php artisan vendor:publish --tag=ses-inbound-mail-migrations
 php artisan migrate
 ```
 
-Without that call both copies stay registered, and with Laravel's default configuration the
-published one runs under a new name and fails on a table that already exists. The same goes
-for `--tag=ses-inbound-mail`, which publishes every resource at once, the migrations included.
+Without that call both copies stay registered: the package goes on migrating its table from its
+own files, and the published copies, which Laravel's default configuration gives a new name, find
+the table built. The same goes for `--tag=ses-inbound-mail`, which publishes every resource at
+once, the migrations included.
+
+`tablesExist: true` says that your application migrates the table itself, so the package keeps
+scheduling the reconciliation and the prune of the retention, which both read it. Called without
+it, `ignoreMigrations()` takes both off the schedule, as for an application that has no such table.
+
+Publish the migrations once. The release notes name each migration a later release adds: copy
+that file from `vendor/pushery/ses-inbound-mail-for-laravel/database/migrations` into
+`database/migrations`, renamed to start with today's date so it runs after the copies you have,
+then run `php artisan migrate`. Publishing the tag again writes every migration a second time under a
+new date, and `migrate` runs each copy as a new migration over the tables the original
+created. If `php artisan migrate` has already run them from the package, copy the files from
+that directory under their own names instead of publishing them: the `migrations` table knows
+them by those names, so `migrate` leaves them alone.
 
 ## Usage
 
-Bind what your application does with a received mail:
+Write what your application does with a received mail as a class of its own, here
+`app/Mail/OpenAConversation.php`:
 
 ```php
+<?php
+
+namespace App\Mail;
+
 use Pushery\SesInboundMail\Contracts\ReceivesInboundMail;
 use Pushery\SesInboundMail\ReceivedMail;
 
@@ -86,14 +108,44 @@ final class OpenAConversation implements ReceivesInboundMail
         // The original lies on $mail->disk under $mail->path, with $mail->sha256.
     }
 }
+```
+
+Bind it in the `register()` method of a service provider of your application, such as
+`App\Providers\AppServiceProvider`:
+
+```php
+use App\Mail\OpenAConversation;
+use Pushery\SesInboundMail\Contracts\ReceivesInboundMail;
 
 $this->app->bind(ReceivesInboundMail::class, OpenAConversation::class);
 ```
 
-Name the topics of Amazon SNS the endpoint takes, and set up the receiving path in AWS:
+Amazon SES receives mail for your domain only once the domain is a verified identity of SES, its
+MX record points to SES and the receipt rule set `inbound` is the active one in your AWS account.
+[Before you start](https://docs.pushery.com/ses-inbound-mail-for-laravel/#before-you-start) gives
+the commands, each run once with the credentials of an administrator of the account.
+
+Write into the `.env` of your application the topics of Amazon SNS the endpoint takes and what the
+setup in AWS sets up. The topic of the setup is one of the topics, by the ARN its region, account
+and name make:
+
+```dotenv
+SES_INBOUND_MAIL_TOPICS=arn:aws:sns:eu-central-1:123456789012:inbound-mail
+SES_INBOUND_MAIL_AWS_REGION=eu-central-1
+SES_INBOUND_MAIL_AWS_ACCOUNT=123456789012
+SES_INBOUND_MAIL_TOPIC=inbound-mail
+SES_INBOUND_MAIL_BUCKET=inbound-mail-transit
+SES_INBOUND_MAIL_RULE=inbound-mail
+SES_INBOUND_MAIL_RECIPIENTS=inbox.example.com
+SES_INBOUND_MAIL_ENDPOINT=https://api.example.com/ses-inbound-mail/notifications
+SES_INBOUND_MAIL_IAM_USER=inbound-mail-app
+```
+
+Deploy the application with them, then set up the receiving path in AWS, with the keys of an
+administrator in front of the command as
+[Setting up AWS](https://docs.pushery.com/ses-inbound-mail-for-laravel/#setting-up-aws) shows:
 
 ```bash
-SES_INBOUND_MAIL_TOPICS=arn:aws:sns:eu-central-1:123456789012:inbound-mail
 php artisan ses-inbound-mail:setup-aws
 ```
 
@@ -106,7 +158,7 @@ A reconciliation every five minutes takes what no notification reported.
 
 The test suite is not part of the published package: the tests and their PHPUnit
 configuration stay in the development repository, so a clone of this repository has no
-`composer test`. [CONTRIBUTING.md](CONTRIBUTING.md) says how a change is tested on its way in.
+`composer test`. [CONTRIBUTING.md](https://github.com/pushery/ses-inbound-mail-for-laravel/blob/main/CONTRIBUTING.md) says how a change is tested on its way in.
 
 ## Security
 

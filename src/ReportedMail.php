@@ -17,8 +17,10 @@ final readonly class ReportedMail
     public const int LONGEST_ID = 255;
 
     /**
-     * The longest address a recorded mail keeps: 64 characters before the `@`, 255 after it. The
-     * headers of a mail no notification reported can name a longer one, and its row leaves it out.
+     * The longest address a recorded mail keeps, counted in bytes over the whole address. The number
+     * is the 64 bytes RFC 5321 allows before the `@`, the `@` itself and the 255 bytes it allows after
+     * it, and neither part is held to its own share. A longer address, reported by SES or read from
+     * the headers of a mail no notification reported, is left out of the row.
      */
     public const int LONGEST_ADDRESS = 320;
 
