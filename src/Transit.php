@@ -79,6 +79,8 @@ final readonly class Transit
             'taken_over_at' => Date::now(),
         ])->save();
 
+        // The answer is not read: a transit copy that stays after the take-over is what the
+        // reconciliation reads back and removes, so a refused delete costs one more pass, never a mail.
         $transit->delete($mail->transit_key);
     }
 
@@ -130,6 +132,8 @@ final readonly class Transit
         [$copied, $copiedSize] = $this->digestOf($to, $path);
 
         if ($copied !== $sha256 || $copiedSize !== $size) {
+            // The answer is not read: the take-over fails below either way, the original stays in
+            // transit, and the next attempt writes this path anew.
             $to->delete($path);
 
             throw new RuntimeException(sprintf('The copy of the mail under %s differs from its original, and the original stays in transit.', $key));
@@ -164,8 +168,12 @@ final readonly class Transit
      * Reads a stream to its end, writing every chunk to a second one where it is given, and answers
      * the SHA-256 and the number of the bytes read.
      *
-     * @param  resource  $from
-     * @param  resource|null  $to
+     * @param  mixed  $from  a stream, for which PHP has no type a declaration can name
+     * @param  mixed  $to  a stream or null, for which PHP has no type a declaration can name either
+     *
+     * @phpstan-param  resource  $from
+     * @phpstan-param  resource|null  $to
+     *
      * @return array{string, int}
      */
     private function pipe(mixed $from, mixed $to): array

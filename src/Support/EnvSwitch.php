@@ -16,6 +16,11 @@ namespace Pushery\SesInboundMail\Support;
  * something off and on are named here, trimmed and in any case. Anything else keeps the value the
  * package ships: a missing line, an empty line as copying a template of a .env leaves one, and a
  * spelling that names neither.
+ *
+ * Internal: the configuration file this package publishes reads no switch, so a published copy
+ * never calls this class.
+ *
+ * @internal
  */
 final class EnvSwitch
 {

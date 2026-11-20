@@ -4,8 +4,15 @@
   "description": "Receive mail through Amazon SES in Laravel: a verified SNS endpoint, takeover from the S3 transit, reconciliation, a check for stuck mail and AWS setup.",
   "keywords": [
     "laravel",
+    "amazon-ses",
+    "aws-ses",
     "ses",
-    "inbound",
+    "amazon-sns",
+    "amazon-s3",
+    "inbound-email",
+    "inbound-mail",
+    "receive-email",
+    "email",
     "mail"
   ],
   "license": "MIT",
@@ -56,8 +63,9 @@
     "pestphp/pest-plugin-laravel": "^5.0",
     "pestphp/pest-plugin-phpstan": "^5.0",
     "pestphp/pest-plugin-type-coverage": "^5.0",
-    "phpstan/phpstan": "^2.3.0",
-    "pushery/sqlens-for-laravel": "^0.33",
+    "phpstan/phpstan": "2.3.5",
+    "phpstan/phpstan-deprecation-rules": "^2.0.5",
+    "pushery/sqlens-for-laravel": "^0.34",
     "rector/rector": "^2.7.0",
     "spatie/laravel-health": "^1.40",
     "spaze/phpstan-disallowed-calls": "^4.12",
@@ -85,6 +93,7 @@
   "minimum-stability": "stable",
   "prefer-stable": true,
   "suggest": {
-    "spatie/laravel-health": "For the check that fails while a mail waits in transit past its time (Pushery\\SesInboundMail\\Health\\NoMailIsStuckInTransitCheck)."
+    "league/flysystem-aws-s3-v3": "For the transit disk on the S3 bucket SES stores every mail into: Laravel's s3 driver builds the disk from this adapter, and without it the takeover, the reconciliation and NoMailIsStuckInTransitCheck stop at a missing class.",
+    "spatie/laravel-health": "For the checks that fail while a mail waits in transit past its time (Pushery\\SesInboundMail\\Health\\NoMailIsStuckInTransitCheck) and while a mail outlives its retention (Pushery\\SesInboundMail\\Health\\NoMailOutlivesItsRetentionCheck)."
   }
 }

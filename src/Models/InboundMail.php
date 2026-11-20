@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pushery\SesInboundMail\Models;
 
 use DateTimeImmutable;
+use DateTimeInterface;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,6 +18,7 @@ use Override;
 use Pushery\SesInboundMail\Models\Concerns\Replaceable;
 use Pushery\SesInboundMail\ReceivedMail;
 use Pushery\SesInboundMail\ReportedMail;
+use RuntimeException;
 
 /**
  * A mail SES reported, one row per id SES gave it, from the notification until the application has
@@ -37,6 +39,8 @@ use Pushery\SesInboundMail\ReportedMail;
  * @property DateTimeImmutable|null $taken_over_at
  * @property DateTimeImmutable|null $handed_over_at
  * @property bool $found_in_transit
+ * @property DateTimeInterface|null $created_at
+ * @property DateTimeInterface|null $updated_at
  */
 class InboundMail extends Model
 {
@@ -127,14 +131,48 @@ class InboundMail extends Model
 
         return static::model()::query()
             ->whereNotNull('handed_over_at')
-            ->where('handed_over_at', '<=', Date::now()->subDays($days));
+            ->where('handed_over_at', '<=', static::boundary(Date::now()->subDays($days)));
     }
 
-    /** Deletes the original on the archive disk before its row goes. */
+    /**
+     * A moment as a query against the moments of this model binds it: in the format the model writes them in.
+     * The query builder binds a bare reading, which PostgreSQL reads in the session's zone, and compared with a
+     * moment written with its offset it would be off by the difference between that zone and the application's.
+     */
+    public static function boundary(DateTimeInterface $moment): string
+    {
+        return (string) static::resolve()->fromDateTime($moment);
+    }
+
+    /**
+     * The format the model writes its moments in. On PostgreSQL it carries the offset, so a `timestamptz` column
+     * holds the instant whatever zone the session runs in: a bare reading, Laravel's default, is read in the
+     * session's zone, and a session outside the application's zone stored every moment shifted by the difference.
+     * MySQL's DATETIME holds no offset and keeps the default, and so does every other engine.
+     */
+    #[Override]
+    public function getDateFormat(): string
+    {
+        return $this->getConnection()->getDriverName() === 'pgsql' ? 'Y-m-d H:i:sP' : parent::getDateFormat();
+    }
+
+    /**
+     * Deletes the original on the archive disk before its row goes. Where the disk refuses the
+     * deletion and the original is still there, the row stays with it: `model:prune` reports the
+     * exception and goes on with the next mail, and the next prune tries again.
+     *
+     * @throws RuntimeException where the original stays on the archive disk
+     */
     protected function pruning(): void
     {
-        if ($this->archive_disk !== null && $this->archive_path !== null) {
-            Storage::disk($this->archive_disk)->delete($this->archive_path);
+        if ($this->archive_disk === null || $this->archive_path === null) {
+            return;
+        }
+
+        $disk = Storage::disk($this->archive_disk);
+
+        if (! $disk->delete($this->archive_path) && $disk->exists($this->archive_path)) {
+            throw new RuntimeException(sprintf('The original of the mail %s could not be deleted from the disk %s, and its row stays.', $this->message_id, $this->archive_disk));
         }
     }
 

@@ -16,7 +16,12 @@ use Pushery\SesInboundMail\Aws\SetupTarget;
 /**
  * Sets up the receiving path in AWS, or checks it with `--check`, which writes nothing and fails where an
  * item is missing or differs. A second run changes nothing. It runs with the credentials the SDK
- * finds on the machine, never with the application's own keys.
+ * finds for the process, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the environment ahead
+ * of any profile, and that environment holds the application's `.env` as well: the keys of an
+ * administrator go in front of the command, where the `.env` does not override them.
+ *
+ * A run fails as well while the endpoint does not take the topic, since no run can add it to the
+ * application's configuration, and it names the ARN to add.
  */
 #[Signature('ses-inbound-mail:setup-aws {--check : Read every item and write nothing}')]
 #[Description('Set up the bucket, the topic, the receipt rule and the IAM policy of the receiving path in AWS, or check them.')]
@@ -42,12 +47,20 @@ final class SetUpAwsCommand extends Command
 
         $this->table(['Item', 'Outcome'], $rows);
 
-        if ($check && array_intersect($outcomes, [AwsSetup::MISSING, AwsSetup::DIFFERS]) !== []) {
+        $taken = $outcomes[AwsSetup::ENDPOINT_TAKES_THE_TOPIC] === AwsSetup::OK;
+
+        if (! $taken) {
+            $this->error(sprintf('The endpoint takes no message from %s, which ses-inbound-mail.topics does not name. Add it to SES_INBOUND_MAIL_TOPICS, deploy the application with it, and run the setup again.', $target->topicArn()));
+        }
+
+        $inAws = array_diff_key($outcomes, [AwsSetup::ENDPOINT_TAKES_THE_TOPIC => true]);
+
+        if ($check && array_intersect($inAws, [AwsSetup::MISSING, AwsSetup::DIFFERS]) !== []) {
             $this->error('The setup in AWS is not complete. Run the command without --check to complete it.');
 
             return self::FAILURE;
         }
 
-        return self::SUCCESS;
+        return $taken ? self::SUCCESS : self::FAILURE;
     }
 }

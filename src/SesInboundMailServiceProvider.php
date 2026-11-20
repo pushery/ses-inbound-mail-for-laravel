@@ -9,7 +9,6 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Foundation\CachesConfiguration;
-use Illuminate\Contracts\Translation\Loader;
 use Illuminate\Support\ServiceProvider;
 use Override;
 use Pushery\SesInboundMail\Aws\AwsClients;
@@ -17,19 +16,43 @@ use Pushery\SesInboundMail\Console\ReconcileTheTransitCommand;
 use Pushery\SesInboundMail\Console\SetUpAwsCommand;
 use Pushery\SesInboundMail\Console\TakeOverAMailCommand;
 use Pushery\SesInboundMail\Models\InboundMail;
-use Pushery\SesInboundMail\Support\LanguageFallbackLoader;
 
 final class SesInboundMailServiceProvider extends ServiceProvider
 {
+    /**
+     * The sections of the config that are catalogs, as dotted paths from the config key: maps whose
+     * keys the host chooses, one entry per plan, per document or per signing key. A key that a
+     * published catalog leaves out was removed by the host rather than added by a later release, so
+     * the merge takes a published catalog as it stands. A catalog the host never published arrives
+     * whole from the default. A package lists such a section here, for example
+     * 'ses-inbound-mail.plans'.
+     *
+     * @var list<string>
+     */
+    private const array CATALOG_SECTIONS = [];
+
     /**
      * Whether the bundled migrations are registered automatically. Disable with
      * self::ignoreMigrations() to publish and manage them in the host app instead.
      */
     public static bool $runsMigrations = true;
 
-    public static function ignoreMigrations(): void
+    /**
+     * Whether the table exists although the bundled migrations are not registered, because the
+     * application migrates a copy of its own. Only ignoreMigrations(tablesExist: true) sets it, and
+     * it keeps the reconciliation and the prune on the schedule: $runsMigrations alone cannot tell
+     * a table migrated elsewhere from one that was declined.
+     */
+    public static bool $tablesMigratedElsewhere = false;
+
+    /**
+     * Stops registering the bundled migrations. An application that publishes them and migrates the
+     * copy passes tablesExist: true, so the reconciliation and the prune stay on the schedule.
+     */
+    public static function ignoreMigrations(bool $tablesExist = false): void
     {
         self::$runsMigrations = false;
+        self::$tablesMigratedElsewhere = $tablesExist;
     }
 
     #[Override]
@@ -37,12 +60,8 @@ final class SesInboundMailServiceProvider extends ServiceProvider
     {
         $this->mergeConfigRecursivelyFrom(__DIR__.'/../config/ses-inbound-mail.php', 'ses-inbound-mail');
 
-        // A regional locale reads this package's catalog of its language, `pt-BR` from `pt`, in this package's
-        // namespace only. Registered here so it wraps the loader before the translator is built from it.
-        $this->app->extend('translation.loader', static fn (Loader $loader): Loader => new LanguageFallbackLoader($loader, 'ses-inbound-mail'));
-
         // The clients of the setup, in the region the configuration names, with the credentials the SDK
-        // finds on the machine.
+        // finds for the process, the environment first.
         $this->app->bind(AwsClients::class, static function (Application $app): AwsClients {
             $region = $app->make(Repository::class)->get('ses-inbound-mail.aws.region');
 
@@ -52,14 +71,17 @@ final class SesInboundMailServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadTranslationsFrom(__DIR__.'/../lang', 'ses-inbound-mail');
         $this->loadRoutesFrom(__DIR__.'/../routes/ses-inbound-mail.php');
 
         if (self::$runsMigrations) {
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        }
 
-            // The net under the notifications reads the table of the reported mails, so it runs only
-            // where the package keeps its tables.
+        // The net under the notifications and the prune read the table of the reported mails, so
+        // they run only where it exists: where the package migrates it, or where the application
+        // migrates a copy of its own and said so. Read from the flags rather than from the schema,
+        // since asking the database at boot would put a query on every request.
+        if (self::$runsMigrations || self::$tablesMigratedElsewhere) {
             $this->callAfterResolving(Schedule::class, static function (Schedule $schedule, Container $container): void {
                 $schedule->command('ses-inbound-mail:reconcile')->everyFiveMinutes()->withoutOverlapping(5)->onOneServer();
 
@@ -103,10 +125,14 @@ final class SesInboundMailServiceProvider extends ServiceProvider
      * `array_is_list([])` is true, which is the behavior wanted here: an empty array is a host
      * saying "none", and descending into it could only re-introduce what it emptied.
      *
-     * A host with a cached config is never merged at all, by the framework's design. For those
-     * installations the published file is the whole truth, so a package that reads a nested key
-     * needs its read-site fallback to agree with the shipped default. The two are halves of one
-     * guarantee.
+     * Recursion stops at a catalog as well, a section named in CATALOG_SECTIONS. Its keys are the
+     * host's, so a key missing from the published catalog is one the host removed, and laying the
+     * default under it would hand that entry back.
+     *
+     * A host with a cached config is not merged at runtime: the cache already holds the merge
+     * `config:cache` did when it ran. A key a later release adds is missing from it until the host
+     * caches again, so a package that reads a nested key needs its read-site fallback to agree with
+     * the shipped default.
      */
     private function mergeConfigRecursivelyFrom(string $path, string $key): void
     {
@@ -126,15 +152,19 @@ final class SesInboundMailServiceProvider extends ServiceProvider
         $repository->set($key, $this->mergeConfigSections(
             is_array($shipped) ? $shipped : [],
             is_array($existing) ? $existing : [],
+            $key.'.',
+            self::CATALOG_SECTIONS,
         ));
     }
 
     /**
      * @param  array<array-key, mixed>  $shipped
      * @param  array<array-key, mixed>  $published
+     * @param  string  $path  the dotted path of the two maps, so a catalog is recognized at any depth
+     * @param  list<string>  $catalogs  the dotted paths of the catalogs, which the merge takes as published
      * @return array<array-key, mixed>
      */
-    private function mergeConfigSections(array $shipped, array $published): array
+    private function mergeConfigSections(array $shipped, array $published, string $path = '', array $catalogs = []): array
     {
         foreach ($shipped as $key => $value) {
             if (! array_key_exists($key, $published)) {
@@ -143,12 +173,12 @@ final class SesInboundMailServiceProvider extends ServiceProvider
                 continue;
             }
 
-            // Recurse only where both sides are maps. If either is a list, or the published
-            // value is a scalar or an explicit null, what the host wrote stands. An explicit
-            // null is a value like any other here, which keeps "write => null to switch this
-            // off" working exactly as a shipped config file describes it.
-            if (is_array($value) && is_array($published[$key]) && ! array_is_list($value) && ! array_is_list($published[$key])) {
-                $published[$key] = $this->mergeConfigSections($value, $published[$key]);
+            // Recurse only where both sides are maps and the section is no catalog. If either is a
+            // list, or the published value is a scalar or an explicit null, what the host wrote
+            // stands. An explicit null is a value like any other here, which keeps "write => null
+            // to switch this off" working exactly as a shipped config file describes it.
+            if (is_array($value) && is_array($published[$key]) && ! array_is_list($value) && ! array_is_list($published[$key]) && ! in_array($path.$key, $catalogs, true)) {
+                $published[$key] = $this->mergeConfigSections($value, $published[$key], $path.$key.'.', $catalogs);
             }
         }
 
@@ -169,10 +199,11 @@ final class SesInboundMailServiceProvider extends ServiceProvider
         // resource at once — the tag convention Laravel's official package skeleton
         // establishes.
         //
-        // The umbrella covers what a host adapts by editing a file: config and lang. There is
-        // deliberately no views group, because the package renders no page. The umbrella has
-        // two exceptions, and a package can grow into either without a warning, because
-        // publishing more is not an error anywhere:
+        // The umbrella covers what a host adapts by editing a file: the config. There is
+        // deliberately no views group, because the package renders no page, and no lang group,
+        // because it writes no text to translate. The umbrella has two exceptions, and a package
+        // can grow into either without a warning, because publishing more is not an error
+        // anywhere:
         //
         //   * Migration tags split per opt-in layer. A published migration runs. A package
         //     that separates its migration tags does so that a host which enabled one layer
@@ -189,9 +220,5 @@ final class SesInboundMailServiceProvider extends ServiceProvider
         $this->publishesMigrations([
             __DIR__.'/../database/migrations' => $this->app->databasePath('migrations'),
         ], ['ses-inbound-mail', 'ses-inbound-mail-migrations']);
-
-        $this->publishes([
-            __DIR__.'/../lang' => $this->app->langPath('vendor/ses-inbound-mail'),
-        ], ['ses-inbound-mail', 'ses-inbound-mail-lang']);
     }
 }

@@ -10,10 +10,11 @@ use Spatie\Health\Checks\Check;
 use Spatie\Health\Checks\Result;
 
 /**
- * Fails while a mail waits twice the time the reconciliation takes it, in transit or taken over and
- * never handed to the application, for an application that runs `spatie/laravel-health`. Such a
- * mail was not reconciled in two runs or more: the scheduler does not run, its takeover keeps
- * failing, or the application refuses it.
+ * Fails while a mail waits twice the time the reconciliation takes it, in transit or recorded and
+ * never handed to the application, whether its original is still in transit or not, for an
+ * application that runs `spatie/laravel-health`. Such a mail was not reconciled in two runs or more:
+ * the scheduler does not run, its takeover keeps failing, its original is lost, or the application
+ * refuses it.
  */
 final class NoMailIsStuckInTransitCheck extends Check
 {

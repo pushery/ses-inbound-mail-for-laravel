@@ -11,8 +11,11 @@ use Aws\Sns\SnsClient;
 
 /**
  * The clients of AWS the setup talks to, all in the region of the setup and with the credentials the
- * SDK finds on its own: the environment, a profile or the role of the machine. The application's own
- * keys are not used, because they may only read and delete in the transit.
+ * SDK finds for the process: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the environment
+ * first, then a profile, then the role of the machine. Laravel loads the application's `.env` into
+ * that environment, so keys it names there are the ones these clients use, `AWS_PROFILE` set or not.
+ * The setup needs the keys of an administrator, set in front of the command, where the `.env` does
+ * not override them.
  */
 final readonly class AwsClients
 {

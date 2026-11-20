@@ -10,6 +10,7 @@ use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Config\Repository;
 use Pushery\SesInboundMail\Jobs\TakeOverTheMail;
 use Pushery\SesInboundMail\Models\InboundMail;
+use Throwable;
 
 /**
  * Takes in what SES reports: a row for each mail, once per id SES gave it, and the takeover of its
@@ -48,7 +49,8 @@ final readonly class Inbox
     /**
      * Queues the takeover of a recorded mail on the connection and the queue the configuration names,
      * as often as it allows, and answers whether it did: while a takeover of the mail is queued or
-     * waits for its next try, no second one is.
+     * waits for its next try, no second one is. Where the queue refuses the job, its exception goes
+     * on and the lock is given up, so the next takeover of the mail is queued.
      */
     public function takeOver(InboundMail $mail): bool
     {
@@ -73,7 +75,16 @@ final readonly class Inbox
             return false;
         }
 
-        $this->bus->dispatch($job);
+        // The lock is taken by hand, so it is given up by hand where the job never reached the
+        // queue, as Laravel's own dispatch of a unique job does. Kept, it would answer every later
+        // takeover of the mail as queued until it expires, while nothing waits in the queue.
+        try {
+            $this->bus->dispatch($job);
+        } catch (Throwable $failure) {
+            new UniqueLock($this->cache)->release($job);
+
+            throw $failure;
+        }
 
         return true;
     }

@@ -15,17 +15,23 @@ use RuntimeException;
 
 /**
  * The setup of the receiving path in AWS, the same for every application: the bucket of the transit, its
- * policy for SES, its lifecycle, the topic SES reports to and its policy, the subscription of the
- * application's endpoint, the receipt rule in the rule set every application of the account shares,
- * and an IAM policy that lets the application's user only read, list and delete in its own transit.
+ * policy for SES, its lifecycle, the topic SES reports to with the signature SNS gives its messages and
+ * its policy, the subscription of the application's endpoint, the receipt rule in the rule set every
+ * application of the account shares, and an IAM policy that lets the application's user only read,
+ * list and delete in its own transit.
  *
  * Every item is read first and written only where it differs, so a second run changes nothing. A
- * check writes nothing and names every item that is missing or differs.
+ * check writes nothing and names every item that is missing or differs. One item lies outside AWS:
+ * whether the endpoint takes the messages of the topic, which the application's own configuration
+ * decides and the setup only reads.
  */
 final readonly class AwsSetup
 {
     /** The rule set every application of the account shares. It is created and activated once, by hand. */
     public const string RULE_SET = 'inbound';
+
+    /** The item that holds the topic against the topics the endpoint takes, the one item no run writes. */
+    public const string ENDPOINT_TAKES_THE_TOPIC = 'endpoint takes the topic';
 
     /** After how many days the lifecycle removes a mail from the transit, as a net under the takeover. */
     public const int EXPIRE_AFTER_DAYS = 14;
@@ -38,6 +44,9 @@ final readonly class AwsSetup
 
     /** The id of the lifecycle rule of this package, beside which a rule of another kind stays. */
     public const string LIFECYCLE_RULE = 'ses-inbound-mail';
+
+    /** The version SNS signs the messages of the topic under: 2, SHA256 with RSA, where SNS's own default is SHA1. */
+    public const string SIGNATURE_VERSION = '2';
 
     /** What S3 answers about an item of a bucket that does not exist, which a check meets on a fresh account. */
     private const string NO_BUCKET = 'NoSuchBucket';
@@ -67,6 +76,12 @@ final readonly class AwsSetup
         $s3 = $this->clients->s3();
         $sns = $this->clients->sns();
 
+        // Every ARN of the setup names its region, and a bucket gets the region of the S3 client, so
+        // clients that stand anywhere else would set up a path that does not meet.
+        if ($s3->getRegion() !== $this->target->region) {
+            throw new RuntimeException(sprintf('The clients of the setup stand in %s, and the setup is for %s. Bind AwsClients in the region of ses-inbound-mail.aws.region.', $s3->getRegion(), $this->target->region));
+        }
+
         return [
             'bucket' => $this->bucket($check, $s3),
             'public access block' => $this->publicAccessBlock($check, $s3),
@@ -75,7 +90,9 @@ final readonly class AwsSetup
             'bucket policy' => $this->bucketPolicy($check, $s3),
             'lifecycle' => $this->lifecycle($check, $s3),
             'topic' => $this->topic($sns, $check),
+            'topic signature' => $this->topicSignature($sns, $check),
             'topic policy' => $this->topicPolicy($sns, $check),
+            self::ENDPOINT_TAKES_THE_TOPIC => $this->endpointTakesTheTopic(),
             'subscription' => $this->subscription($sns, $check),
             'receipt rule' => $this->receiptRule($this->clients->ses(), $check),
             'user policy' => $this->userPolicy($this->clients->iam(), $check),
@@ -98,10 +115,9 @@ final readonly class AwsSetup
             return self::MISSING;
         }
 
-        // @phpstan-ignore argument.type (the SDK lists the regions it knew at its release; a newer one is a location S3 accepts all the same)
-        $s3->createBucket($this->target->region === 'us-east-1'
-            ? ['Bucket' => $this->target->bucket]
-            : ['Bucket' => $this->target->bucket, 'CreateBucketConfiguration' => ['LocationConstraint' => $this->target->region]]);
+        // The S3 client gives a bucket created without a location the location of its own region, which
+        // run() holds to the region of the setup, and leaves it out in us-east-1, where S3 takes none.
+        $s3->createBucket(['Bucket' => $this->target->bucket]);
 
         return self::CREATED;
     }
@@ -198,6 +214,16 @@ final readonly class AwsSetup
         });
     }
 
+    private function topicSignature(SnsClient $sns, bool $check): string
+    {
+        $current = $this->read(fn (): ResultInterface => $sns->getTopicAttributes(['TopicArn' => $this->target->topicArn()]), 'NotFound');
+
+        // An answer without the version means version 1 to SNS, so it differs as a 1 does.
+        return $this->settle($current?->search('Attributes.SignatureVersion') === self::SIGNATURE_VERSION, ! $current instanceof ResultInterface, $check, function () use ($sns): void {
+            $sns->setTopicAttributes(['TopicArn' => $this->target->topicArn(), 'AttributeName' => 'SignatureVersion', 'AttributeValue' => self::SIGNATURE_VERSION]);
+        });
+    }
+
     private function topicPolicy(SnsClient $sns, bool $check): string
     {
         $wanted = [
@@ -219,6 +245,17 @@ final readonly class AwsSetup
         return $this->settle($this->decoded($current?->search('Attributes.Policy')) == $wanted, ! $current instanceof ResultInterface, $check, function () use ($sns, $wanted): void {
             $sns->setTopicAttributes(['TopicArn' => $this->target->topicArn(), 'AttributeName' => 'Policy', 'AttributeValue' => $this->encoded($wanted)]);
         });
+    }
+
+    /**
+     * Whether the endpoint takes the messages of the topic, which it does only where the topics of
+     * `ses-inbound-mail.topics` name its ARN. Until then it refuses SNS's request to confirm the
+     * subscription as it refuses every notification. The list is the application's to write, so the
+     * item stays missing in a run as in a check.
+     */
+    private function endpointTakesTheTopic(): string
+    {
+        return in_array($this->target->topicArn(), $this->target->topics, true) ? self::OK : self::MISSING;
     }
 
     private function subscription(SnsClient $sns, bool $check): string
@@ -265,7 +302,13 @@ final readonly class AwsSetup
         $set = $this->read(fn (): ResultInterface => $ses->describeReceiptRuleSet(['RuleSetName' => self::RULE_SET]), 'RuleSetDoesNotExist');
 
         if (! $set instanceof ResultInterface) {
-            throw new RuntimeException(sprintf('The receipt rule set %s does not exist in %s. Create it once for the account and make it the active one, then run the setup again.', self::RULE_SET, $this->target->region));
+            throw new RuntimeException(sprintf(
+                'The receipt rule set %1$s does not exist in %2$s. Create it once for the account and make it the active one, then run the setup again. '
+                .'SES receives with one active rule set at a time, so where another one is active, move its rules into %1$s before %1$s becomes the active one. '
+                .'Where none is active: aws ses create-receipt-rule-set --rule-set-name %1$s --region %2$s && aws ses set-active-receipt-rule-set --rule-set-name %1$s --region %2$s',
+                self::RULE_SET,
+                $this->target->region,
+            ));
         }
 
         $rules = $set->get('Rules');
@@ -354,7 +397,10 @@ final readonly class AwsSetup
         return $missing ? self::CREATED : self::CHANGED;
     }
 
-    /** @return array<array-key, mixed>|null */
+    /**
+     * @param  mixed  $json  a policy document as the AWS SDK hands it back, a JSON string where there is one and anything else where there is none
+     * @return array<array-key, mixed>|null
+     */
     private function decoded(mixed $json): ?array
     {
         if (! is_string($json) || $json === '') {
