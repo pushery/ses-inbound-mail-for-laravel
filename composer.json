@@ -45,7 +45,8 @@
     "illuminate/http": "^13.0",
     "illuminate/log": "^13.0",
     "illuminate/routing": "^13.0",
-    "illuminate/support": "^13.0"
+    "illuminate/support": "^13.0",
+    "symfony/console": "^7.0 || ^8.0"
   },
   "require-dev": {
     "fakerphp/faker": "^1.24",
@@ -65,7 +66,7 @@
     "pestphp/pest-plugin-type-coverage": "^5.0",
     "phpstan/phpstan": "2.3.5",
     "phpstan/phpstan-deprecation-rules": "^2.0.5",
-    "pushery/sqlens-for-laravel": "^0.34",
+    "pushery/sqlens-for-laravel": "^0.35",
     "rector/rector": "^2.7.0",
     "spatie/laravel-health": "^1.40",
     "spaze/phpstan-disallowed-calls": "^4.12",

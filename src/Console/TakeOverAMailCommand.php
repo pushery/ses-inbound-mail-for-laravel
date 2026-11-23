@@ -9,6 +9,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Pushery\SesInboundMail\Reconciliation;
 use RuntimeException;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
  * Takes over one mail in transit by its key, whatever its age: records it where no notification did,
@@ -25,7 +26,7 @@ final class TakeOverAMailCommand extends Command
         try {
             $outcome = $reconciliation->handle($this->argument('key'));
         } catch (RuntimeException $failure) {
-            $this->error($failure->getMessage());
+            $this->error(OutputFormatter::escape($failure->getMessage()));
 
             return self::FAILURE;
         }

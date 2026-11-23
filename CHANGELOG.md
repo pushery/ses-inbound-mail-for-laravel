@@ -4,6 +4,28 @@ All notable changes to `pushery/ses-inbound-mail-for-laravel` are documented her
 
 A release carries only the sections that have an entry, in this order: `### ⚠️ Breaking`, `### ✨ Added`, `### 🔧 Changed`, `### ⚡ Performance`, `### 🐛 Fixed`, `### 🔒 Security`, `### 🧹 Deprecated`, `### 🗑️ Removed` and `### 📚 Documentation`.
 
+## [0.4.0] - 2026-11-23
+
+### ✨ Added
+
+- **`PruneExpiredCacheKeys` deletes the signing certificates of SNS a database or a file store keeps past their day.** Such a store deletes an expired entry only when its key is read again, so a certificate the package no longer asks for stayed for good. Scheduled with `Schedule::call(PruneExpiredCacheKeys::class)->daily();`, it deletes the expired rows under `ses-inbound-mail:` in the default store and the store of the rate limiter, and the expired files of a file store; Redis, Memcached and every other store that expires entries itself stay untouched. The documentation has a section on it.
+
+- **`PruneExpiredCacheKeys` also prunes behind a `failover` store and a `storage` store.** Both of these Laravel cache drivers leave expired entries behind as a database or a file store does. A failover store writes each entry into the first of its stores that answers, so the command prunes each of its stores once. A storage store lays its files out on a filesystem disk the way a file store does in its directory, and the command deletes the expired files the store named there and leaves every other file on the disk alone.
+
+### 🔧 Changed
+
+- **`symfony/console` is a declared dependency.** `ses-inbound-mail:take-over` escapes the reason a takeover failed with its output formatter. Every Laravel version the package supports installs the component already, so no installation resolves differently.
+
+### 🐛 Fixed
+
+- **`ses-inbound-mail:take-over` prints the reason a takeover failed as it stands.** Symfony's console formatter read a part of it that looks like a style tag as styling and dropped it.
+
+### 📚 Documentation
+
+- **The Boost skill declares its example of a receiver in `App\Mail`.** The class `FileTheDocument` stood in no namespace there, so a copy of it under `app/Mail` was a class the autoloader does not find. It now stands where the receiver on the start page does.
+
+- **The documentation says that the `octane` store of Laravel Octane is out of the pruner's reach.** The store keeps an expired entry in a table of a fixed number of rows, `octane.cache.rows`, until its key is written again or the server restarts, and the scheduler, where the pruner runs, sees an empty store. Once the table is full, writing a new key fails, so the documentation advises against making `octane` the default cache store of an application that runs this package.
+
 ## [0.3.0] - 2026-11-20
 
 ### ✨ Added
@@ -91,7 +113,8 @@ A release carries only the sections that have an entry, in this order: `### ⚠�
 - **The reconciliation, the net under the notifications.** Every five minutes, on one server, `ses-inbound-mail:reconcile` goes through every mail that has waited in transit for more than fifteen minutes, a limit that is the same for every application. A mail no notification reported is recorded with the envelope its headers name, leaving out an address longer than 320 characters, and taken over. A takeover that stopped is queued once more, the copy of a mail that was already taken over and the file SES writes to test its access are removed, and a mail that cannot be handled holds up none of the others. `ses-inbound-mail:take-over <key>` takes one mail by its key, whatever its age. For an application that runs `spatie/laravel-health`, `NoMailIsStuckInTransitCheck` fails while a mail waits past that time.
 - **The setup of the receiving path in AWS.** `php artisan ses-inbound-mail:setup-aws` sets up what `ses-inbound-mail.aws` names: the bucket of the transit with Block Public Access, Bucket owner enforced and SSE-S3, its policy that lets SES store only the mail of the application's own receipt rule, its lifecycle, the topic and its policy, the subscription of the endpoint, the receipt rule in the rule set `inbound` the applications of an account share, and an IAM policy that lets the application's user only read, list and delete in the transit. The lifecycle is the same for every application: a mail is deleted after 14 days as a net under the takeover, a version that is no longer the current one after a day, and an upload that never finished after a day. Every item is read first and written only where it differs, so a second run changes nothing, and `--check` writes nothing and fails where an item is missing or differs.
 
-[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.0...v0.2.1
