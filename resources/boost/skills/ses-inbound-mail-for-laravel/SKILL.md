@@ -105,6 +105,8 @@ take one mail by its key in the transit, whatever its age, run
 ## Examples
 
 ```php
+namespace App\Mail;
+
 use App\Models\Document;
 use Pushery\SesInboundMail\Contracts\ReceivesInboundMail;
 use Pushery\SesInboundMail\ReceivedMail;
