@@ -27,6 +27,11 @@ use Pushery\SesInboundMail\Support\TableLookup;
 // blocks no read or write while it waits, so it is left to wait rather than cut short by a
 // lock_timeout. MySQL adds the index in place while writes go on, and the wait for the table's
 // metadata lock is bounded. SQLite builds it plainly.
+//
+// PostgreSQL and SQLite allow an index name once per schema, so there the name carries the table
+// prefix where the connection prefixes its indexes, as a name Laravel derives does. A second install
+// under another prefix in the same schema then drops and builds its own index, not the one of the
+// first. MySQL allows an index name once per table, and the name stays as it is.
 return new class extends Migration
 {
     private const string INDEX = 'ses_inbound_mails_handed_over_at_taken_over_at_index';
@@ -38,10 +43,10 @@ return new class extends Migration
     {
         if (Schema::getConnection()->getDriverName() === 'pgsql') {
             // On a first run nothing stands under the name, and the drop changes nothing.
-            Schema::getConnection()->statement('drop index concurrently if exists '.self::INDEX);
+            Schema::getConnection()->statement('drop index concurrently if exists '.$this->index());
 
             Schema::table('ses_inbound_mails', function (Blueprint $table): void {
-                $table->index(['handed_over_at', 'taken_over_at'], self::INDEX)->online();
+                $table->index(['handed_over_at', 'taken_over_at'], $this->index())->online();
             });
 
             return;
@@ -52,15 +57,15 @@ return new class extends Migration
         // MySQL and SQLite leave no index behind a build that fails, so an index under the name is
         // this one, and a copy of this file that runs after it, as one published a second time does,
         // leaves it as it is.
-        Schema::whenTableDoesntHaveIndex(TableLookup::qualified('ses_inbound_mails'), self::INDEX, function (Blueprint $table): void {
-            $table->index(['handed_over_at', 'taken_over_at'], self::INDEX)->online();
+        Schema::whenTableDoesntHaveIndex(TableLookup::qualified('ses_inbound_mails'), $this->index(), function (Blueprint $table): void {
+            $table->index(['handed_over_at', 'taken_over_at'], $this->index())->online();
         });
     }
 
     public function down(): void
     {
         if (Schema::getConnection()->getDriverName() === 'pgsql') {
-            Schema::getConnection()->statement('drop index concurrently if exists '.self::INDEX);
+            Schema::getConnection()->statement('drop index concurrently if exists '.$this->index());
 
             return;
         }
@@ -68,7 +73,17 @@ return new class extends Migration
         MigrationLocks::bound();
 
         Schema::table('ses_inbound_mails', function (Blueprint $table): void {
-            $table->dropIndex(self::INDEX);
+            $table->dropIndex($this->index());
         });
+    }
+
+    /** The name the index goes by on the connection the migration runs on. */
+    private function index(): string
+    {
+        $connection = Schema::getConnection();
+
+        return in_array($connection->getDriverName(), ['pgsql', 'sqlite'], true) && (bool) $connection->getConfig('prefix_indexes')
+            ? $connection->getTablePrefix().self::INDEX
+            : self::INDEX;
     }
 };
