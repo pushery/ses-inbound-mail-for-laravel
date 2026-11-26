@@ -50,6 +50,13 @@ class InboundMail extends Model
     /** @var string */
     protected $table = 'ses_inbound_mails';
 
+    /**
+     * The default its migration writes, so an instance created without it reads what its row holds.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = ['found_in_transit' => false];
+
     /** @var list<string> */
     protected $fillable = [
         'message_id',

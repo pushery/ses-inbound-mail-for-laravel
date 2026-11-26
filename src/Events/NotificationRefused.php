@@ -20,6 +20,12 @@ final readonly class NotificationRefused
     /** A message whose signature is no valid one of SNS. */
     public const string SIGNATURE = 'signature';
 
+    /**
+     * A message whose signature could not be checked, because the address of its certificate did not answer, or
+     * answered with a server error or 429. It is answered 503, which SNS delivers again.
+     */
+    public const string CERTIFICATE_UNAVAILABLE = 'certificate unavailable';
+
     /** A subscription to confirm at an address that is none of SNS. */
     public const string SUBSCRIPTION_ADDRESS = 'subscription address';
 

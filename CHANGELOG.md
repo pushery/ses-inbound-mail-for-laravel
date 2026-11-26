@@ -4,6 +4,19 @@ All notable changes to `pushery/ses-inbound-mail-for-laravel` are documented her
 
 A release carries only the sections that have an entry, in this order: `### ⚠️ Breaking`, `### ✨ Added`, `### 🔧 Changed`, `### ⚡ Performance`, `### 🐛 Fixed`, `### 🔒 Security`, `### 🧹 Deprecated`, `### 🗑️ Removed` and `### 📚 Documentation`.
 
+## [0.4.1] - 2026-11-26
+
+### 🐛 Fixed
+
+- **`ses-inbound-mail:reconcile` succeeds on an installation whose transit disk names no bucket.** An S3 transit disk without a bucket, as an installation that receives no mail configures it, made the scheduled command fail every five minutes with a `TypeError` from the S3 adapter. The command now says that no mail can be in transit and succeeds without resolving the disk. A disk that names its bucket is reconciled as before.
+- **An inbound mail created without `found_in_transit` reads `false` after `save()`, as its row holds it.** The migration writes the column as `false` where a row does not name it, and the model did not know that default, so an instance created other than through `record()`, by a factory, a test or a host, read `null` until it was loaded again. The model now names the default.
+- **A certificate of SNS that cannot be fetched no longer loses the message.** The endpoint answered a message whose signing certificate it could not fetch with 403, as it answers a forged signature, and Amazon SNS never delivers a message again that was answered 403. A mail whose notification needed its certificate while the address of the certificate did not answer, or answered with a server error or 429, was lost. Such a message is now answered 503, which SNS delivers again, and `NotificationRefused` names the reason `certificate unavailable`. An address that answers it has no such certificate, and a signature that does not hold, stay refused with 403.
+- **A second install under another table prefix in the same PostgreSQL schema keeps the handover index of the first.** The migration of the index drops whatever stands under its name before it builds it, and the name was the same under every prefix, so the migration of a second install in the same schema dropped the index of the first. On PostgreSQL and SQLite the name now carries the table prefix where the connection sets `prefix_indexes`, as a name Laravel derives does. An install that already ran the migration keeps its index as it is.
+
+### 📚 Documentation
+
+- **The requirements name the versions the package is tested on.** PHP 8.4.27, 8.5.x and 8.6.x, PostgreSQL 18.7 and MySQL 8.4.13, in the README and on the start page of the documentation.
+
 ## [0.4.0] - 2026-11-23
 
 ### ✨ Added
@@ -113,7 +126,8 @@ A release carries only the sections that have an entry, in this order: `### ⚠�
 - **The reconciliation, the net under the notifications.** Every five minutes, on one server, `ses-inbound-mail:reconcile` goes through every mail that has waited in transit for more than fifteen minutes, a limit that is the same for every application. A mail no notification reported is recorded with the envelope its headers name, leaving out an address longer than 320 characters, and taken over. A takeover that stopped is queued once more, the copy of a mail that was already taken over and the file SES writes to test its access are removed, and a mail that cannot be handled holds up none of the others. `ses-inbound-mail:take-over <key>` takes one mail by its key, whatever its age. For an application that runs `spatie/laravel-health`, `NoMailIsStuckInTransitCheck` fails while a mail waits past that time.
 - **The setup of the receiving path in AWS.** `php artisan ses-inbound-mail:setup-aws` sets up what `ses-inbound-mail.aws` names: the bucket of the transit with Block Public Access, Bucket owner enforced and SSE-S3, its policy that lets SES store only the mail of the application's own receipt rule, its lifecycle, the topic and its policy, the subscription of the endpoint, the receipt rule in the rule set `inbound` the applications of an account share, and an IAM policy that lets the application's user only read, list and delete in the transit. The lifecycle is the same for every application: a mail is deleted after 14 days as a net under the takeover, a version that is no longer the current one after a day, and an upload that never finished after a day. Every item is read first and written only where it differs, so a second run changes nothing, and `--check` writes nothing and fails where an item is missing or differs.
 
-[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.1...v0.2.2

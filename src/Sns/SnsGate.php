@@ -80,7 +80,16 @@ final readonly class SnsGate
             return $this->refuse($request, NotificationRefused::UNREADABLE, $topic, 400);
         }
 
-        if (! $this->validator->isValid($message)) {
+        // The validator turns a certificate it got no answer for into an invalid signature, and SNS never delivers a
+        // message again that was answered 403. A certificate whose address did not answer says nothing about the
+        // message, so it is answered 503, which SNS delivers again.
+        try {
+            $valid = $this->validator->isValid($message);
+        } catch (CertificateUnavailable) {
+            return $this->refuse($request, NotificationRefused::CERTIFICATE_UNAVAILABLE, $topic, 503);
+        }
+
+        if (! $valid) {
             return $this->refuse($request, NotificationRefused::SIGNATURE, $topic);
         }
 

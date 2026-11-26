@@ -35,7 +35,32 @@ final readonly class Transit
     /** The disk SES stores the mails in transit on. */
     public function disk(): Filesystem
     {
-        return $this->disks->disk($this->string('ses-inbound-mail.transit_disk', 'ses-transit'));
+        return $this->disks->disk($this->diskName());
+    }
+
+    /** The name of the transit disk in the application's filesystems. */
+    public function diskName(): string
+    {
+        return $this->string('ses-inbound-mail.transit_disk', 'ses-transit');
+    }
+
+    /**
+     * Whether the transit is an S3 disk whose configuration names no bucket, as on an installation
+     * that receives no mail. Resolving such a disk fails before a file is read, so nothing can be
+     * in transit there. A disk without an entry in the filesystems configuration is left to its
+     * resolution, which names what is missing.
+     */
+    public function namesNoBucket(): bool
+    {
+        $disk = $this->config->get('filesystems.disks.'.$this->diskName());
+
+        if (! is_array($disk) || ($disk['driver'] ?? null) !== 's3') {
+            return false;
+        }
+
+        $bucket = $disk['bucket'] ?? null;
+
+        return ! is_string($bucket) || trim($bucket) === '';
     }
 
     /** Whether a key in transit is the file SES writes to test its access, which is no mail. */

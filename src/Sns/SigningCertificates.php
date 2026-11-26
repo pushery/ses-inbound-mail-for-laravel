@@ -31,7 +31,12 @@ final readonly class SigningCertificates
         private Repository $cache,
     ) {}
 
-    /** The certificate at the address, or false where none could be fetched. */
+    /**
+     * The certificate at the address, or false where its address answered with none.
+     *
+     * @throws CertificateUnavailable where the address did not answer, or answered with a server error or 429,
+     *                                which says nothing about the message the certificate is for
+     */
     public function fetch(string $address): string|false
     {
         $key = 'ses-inbound-mail:sns-certificate:'.hash('sha256', $address);
@@ -43,8 +48,12 @@ final readonly class SigningCertificates
 
         try {
             $response = $this->http->timeout(self::TIMEOUT)->withoutRedirecting()->get($address);
-        } catch (Throwable) {
-            return false;
+        } catch (Throwable $failure) {
+            throw CertificateUnavailable::because('its address did not answer', $failure);
+        }
+
+        if ($response->serverError() || $response->status() === 429) {
+            throw CertificateUnavailable::because(sprintf('its address answered %d', $response->status()));
         }
 
         $certificate = $response->body();
