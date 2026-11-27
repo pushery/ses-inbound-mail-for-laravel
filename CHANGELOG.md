@@ -4,6 +4,15 @@ All notable changes to `pushery/ses-inbound-mail-for-laravel` are documented her
 
 A release carries only the sections that have an entry, in this order: `### ⚠️ Breaking`, `### ✨ Added`, `### 🔧 Changed`, `### ⚡ Performance`, `### 🐛 Fixed`, `### 🔒 Security`, `### 🧹 Deprecated`, `### 🗑️ Removed` and `### 📚 Documentation`.
 
+## [0.4.2] - 2026-11-27
+
+### 🐛 Fixed
+
+- **`ses-inbound-mail:setup-aws` without credentials names the keys that belong in front of it.** Run without keys in the environment and without a profile, the AWS SDK asked the metadata service of an EC2 instance, which does not answer outside AWS, and the command ended with an uncaught `CredentialsException`, reported to the error tracker as a fault of the application. It now says that `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` of an administrator belong in front of the command, fails, and reports nothing.
+- **The migration that finds `ses_inbound_mails` no longer takes an interrupted table for complete.** On MySQL a `migrate` that stopped between creating the table and creating its unique index on `message_id` left the table without it, and the next run found the table and recorded the migration as done. A notification SNS delivered twice was then recorded twice. Where the table already stands, the migration now checks for the index and stops with a message that names the table and the way to repair it. A table that carries the index, under any name, passes as before.
+
+  **Upgrade:** an installation whose migrations ran through has nothing to do. One whose `migrate` stops at the message adds the index it names, or drops the table if it holds no mail, and runs `migrate` again.
+
 ## [0.4.1] - 2026-11-26
 
 ### 🐛 Fixed
@@ -126,7 +135,8 @@ A release carries only the sections that have an entry, in this order: `### ⚠�
 - **The reconciliation, the net under the notifications.** Every five minutes, on one server, `ses-inbound-mail:reconcile` goes through every mail that has waited in transit for more than fifteen minutes, a limit that is the same for every application. A mail no notification reported is recorded with the envelope its headers name, leaving out an address longer than 320 characters, and taken over. A takeover that stopped is queued once more, the copy of a mail that was already taken over and the file SES writes to test its access are removed, and a mail that cannot be handled holds up none of the others. `ses-inbound-mail:take-over <key>` takes one mail by its key, whatever its age. For an application that runs `spatie/laravel-health`, `NoMailIsStuckInTransitCheck` fails while a mail waits past that time.
 - **The setup of the receiving path in AWS.** `php artisan ses-inbound-mail:setup-aws` sets up what `ses-inbound-mail.aws` names: the bucket of the transit with Block Public Access, Bucket owner enforced and SSE-S3, its policy that lets SES store only the mail of the application's own receipt rule, its lifecycle, the topic and its policy, the subscription of the endpoint, the receipt rule in the rule set `inbound` the applications of an account share, and an IAM policy that lets the application's user only read, list and delete in the transit. The lifecycle is the same for every application: a mail is deleted after 14 days as a net under the takeover, a version that is no longer the current one after a day, and an upload that never finished after a day. Every item is read first and written only where it differs, so a second run changes nothing, and `--check` writes nothing and fails where an item is missing or differs.
 
-[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pushery/ses-inbound-mail-for-laravel/compare/v0.2.2...v0.3.0

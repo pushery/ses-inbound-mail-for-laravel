@@ -22,7 +22,16 @@ return new class extends Migration
         // migrations a second time, or once they have run from the package, gets every file again
         // under a new date, and `migrate` takes each copy for a migration it has not run. The copy
         // leaves the table it finds, and the mails in it, as they are.
+        //
+        // A table found here says that CREATE TABLE ran, not that the unique index after it did. MySQL
+        // runs no DDL inside a transaction, so a `migrate` cut off between the two leaves a table in
+        // which a notification SNS delivers twice is recorded twice, and returning on the table alone
+        // would record that as done. A table that carries the index under any name passes.
         if (TableLookup::exists('ses_inbound_mails')) {
+            if (! Schema::hasIndex(TableLookup::qualified('ses_inbound_mails'), ['message_id'], 'unique')) {
+                throw new RuntimeException('ses_inbound_mails exists without the unique index on message_id that this migration creates, so a previous migrate stopped between the table and its index, or the table is not the one this package creates. Add the index (a unique index on ses_inbound_mails.message_id) and run migrate again, or drop the table first if it holds no mail.');
+            }
+
             return;
         }
 
