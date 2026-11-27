@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pushery\SesInboundMail\Console;
 
+use Aws\Exception\CredentialsException;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -21,7 +22,9 @@ use Pushery\SesInboundMail\Aws\SetupTarget;
  * administrator go in front of the command, where the `.env` does not override them.
  *
  * A run fails as well while the endpoint does not take the topic, since no run can add it to the
- * application's configuration, and it names the ARN to add.
+ * application's configuration, and it names the ARN to add. Where the SDK finds no credentials at all,
+ * the command names the two keys that belong in front of it and fails, and the error goes to no
+ * report: it is a missing input of the operator, not a fault of the application.
  */
 #[Signature('ses-inbound-mail:setup-aws {--check : Read every item and write nothing}')]
 #[Description('Set up the bucket, the topic, the receipt rule and the IAM policy of the receiving path in AWS, or check them.')]
@@ -38,7 +41,15 @@ final class SetUpAwsCommand extends Command
         }
 
         $check = $this->option('check') === true;
-        $outcomes = new AwsSetup($clients, $target)->run($check);
+
+        try {
+            $outcomes = new AwsSetup($clients, $target)->run($check);
+        } catch (CredentialsException) {
+            $this->error('The AWS SDK found no credentials for this process. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of an administrator in front of php artisan ses-inbound-mail:setup-aws, where the .env does not override them.');
+
+            return self::FAILURE;
+        }
+
         $rows = [];
 
         foreach ($outcomes as $item => $outcome) {
